@@ -1,0 +1,217 @@
+{
+  "info": {
+    "name": "Supabase Stripe POC (Auth + Edge Functions)",
+    "description": "1) Run **Auth — Password (get JWT)** first; Tests tab saves `access_token`.\n2) Then call billing-* requests.\nSet collection variables: `base_url`, `anon_key`, `user_email`, `user_password`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://YOUR_PROJECT_REF.supabase.co" },
+    { "key": "anon_key", "value": "YOUR_SUPABASE_ANON_KEY" },
+    { "key": "user_email", "value": "you@example.com" },
+    { "key": "user_password", "value": "your-password" },
+    { "key": "access_token", "value": "" },
+    { "key": "price_id_pro_monthly", "value": "price_YOUR_PRO_MONTHLY_PRICE_ID" },
+    { "key": "checkout_session_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth — Password (get JWT)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const j = pm.response.json();",
+              "  if (j.access_token) {",
+              "    pm.collectionVariables.set('access_token', j.access_token);",
+              "    console.log('Saved access_token to collection variable');",
+              "  }",
+              "} else {",
+              "  console.log('Auth failed', pm.response.text());",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"password\": \"{{user_password}}\"\n}"
+        },
+        "url": "{{base_url}}/auth/v1/token?grant_type=password",
+        "description": "Supabase GoTrue password grant. On success, `access_token` is stored in collection variable for the next requests."
+      }
+    },
+    {
+      "name": "Edge — billing-overview (GET or POST)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" }
+        ],
+        "url": "{{base_url}}/functions/v1/billing-overview",
+        "description": "Accepts GET or POST (`supabase.functions.invoke` defaults to POST). Requires `apikey` + Bearer."
+      }
+    },
+    {
+      "name": "Edge — billing-ensure-customer (POST)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{}" },
+        "url": "{{base_url}}/functions/v1/billing-ensure-customer",
+        "description": "Optional; subscribe also creates Stripe customer if missing."
+      }
+    },
+    {
+      "name": "Edge — billing-subscribe (POST)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"priceId\": \"{{price_id_pro_monthly}}\"\n}"
+        },
+        "url": "{{base_url}}/functions/v1/billing-subscribe",
+        "description": "Must use a whitelisted price ID. Change the `price_id_pro_monthly` variable for other plans."
+      }
+    },
+    {
+      "name": "Edge — billing-create-checkout-session (POST)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const j = pm.response.json();",
+              "  if (j.sessionId) pm.collectionVariables.set('checkout_session_id', j.sessionId);",
+              "  if (j.checkoutUrl) console.log('Open in browser:', j.checkoutUrl);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"priceId\": \"{{price_id_pro_monthly}}\"\n}"
+        },
+        "url": "{{base_url}}/functions/v1/billing-create-checkout-session",
+        "description": "Needs Edge secrets CHECKOUT_SUCCESS_URL (with {CHECKOUT_SESSION_ID}) and CHECKOUT_CANCEL_URL. Copy `checkoutUrl` from response, open in browser, pay with 4242…. Then set `checkout_session_id` from redirect URL and run **billing-sync-checkout**."
+      }
+    },
+    {
+      "name": "Edge — billing-sync-checkout (POST)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sessionId\": \"{{checkout_session_id}}\"\n}"
+        },
+        "url": "{{base_url}}/functions/v1/billing-sync-checkout",
+        "description": "After Checkout completes, use the `session_id` (cs_…) from the success URL."
+      }
+    },
+    {
+      "name": "Edge — billing-cancel (POST)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"atPeriodEnd\": true\n}"
+        },
+        "url": "{{base_url}}/functions/v1/billing-cancel",
+        "description": "`atPeriodEnd: false` = immediate cancel."
+      }
+    },
+    {
+      "name": "Edge — billing-change-plan (POST)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"priceId\": \"price_YOUR_PRO_YEARLY_PRICE_ID\",\n  \"prorationBehavior\": \"create_prorations\"\n}"
+        },
+        "url": "{{base_url}}/functions/v1/billing-change-plan",
+        "description": "Replace `priceId` with any whitelisted price ID."
+      }
+    },
+    {
+      "name": "Edge — billing-invoices (GET)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" }
+        ],
+        "url": "{{base_url}}/functions/v1/billing-invoices",
+        "description": "Returns `{ invoices: [...] }` from Stripe."
+      }
+    },
+    {
+      "name": "Edge — billing-payment-method (GET)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" }
+        ],
+        "url": "{{base_url}}/functions/v1/billing-payment-method",
+        "description": "`{ paymentMethod: null }` if none on file."
+      }
+    },
+    {
+      "name": "Edge — billing-portal (POST)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{}" },
+        "url": "{{base_url}}/functions/v1/billing-portal",
+        "description": "Needs `BILLING_PORTAL_RETURN_URL` secret + Stripe Customer portal enabled."
+      }
+    }
+  ]
+}
